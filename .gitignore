@@ -1,0 +1,14 @@
+#.gitignore for Wayne Industries project
+# Ignore Python virtual env
+/.venv
+
+# Ignore backend environment file with secrets
+/backend/.env
+
+# Node modules and build artifacts
+/frontend/node_modules
+/frontend/dist
+
+# IDE/editor config
+.vscode
+*.log
