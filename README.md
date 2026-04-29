@@ -281,10 +281,10 @@ CORS_ORIGINS=http://localhost:5173
 
 ## Suporte e Contato
 
-- **Desenvolvedor**: [Seu Nome]
-- **Email**: [seu-email@exemplo.com]
-- **LinkedIn**: [seu-perfil-linkedin]
-- **Portfolio**: [seu-site-portfolio]
+- **Desenvolvedor**: Gabriel Alves
+- **Email**: gaa.alves74@gmail.com
+- **LinkedIn**: https://www.linkedin.com/in/gabriel-alves-coelho-2485101a2/
+- **Portfolio**: https://gabriel-alves.vercel.app/
 
 ---
 
