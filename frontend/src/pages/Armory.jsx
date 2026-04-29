@@ -22,10 +22,7 @@ export default function Armory({ token }) {
     onSuccess: (data) => setInventory(data)
   })
 
-  const allItems = [
-    ...(state.allies || []),
-    ...(state.inventory || [])
-  ]
+  const allItems = state.inventory || []
 
   const handleItemClick = (item) => {
     setSelectedItem(item)

@@ -121,7 +121,7 @@ def get_db():
     return conn
 
 def init_db():
-    """Initialize database with schema"""
+    """Initialize database with schema and default data"""
     with app.app_context():
         db = get_db()
         db.executescript('''
@@ -167,6 +167,33 @@ def init_db():
                 revoked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         ''')
+        
+        # Insert default users for testing
+        USERS = [
+            ('batman', 'wayne123', 'admin'),
+            ('robin', 'robin123', 'manager'),
+            ('oracle', 'oracle123', 'employee')
+        ]
+        for username, password, role in USERS:
+            cursor = db.execute('SELECT id FROM users WHERE username = ?', (username,))
+            if not cursor.fetchone():
+                db.execute('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)', 
+                          (username, password, role))
+        
+        # Insert sample inventory data
+        cursor = db.execute('SELECT COUNT(*) FROM inventory')
+        if cursor.fetchone()[0] == 0:
+            seed_data = [
+                ('Batmóvel', 'Vehicle', 1, 'Advanced tactical vehicle with military-grade armor', '🚗'),
+                ('Batarangues', 'Equipment', 50, 'Throwing weapons with tracking capabilities', '🥷'),
+                ('Traje de Batalha', 'Equipment', 5, 'Bulletproof armor with tactical systems', '🦇'),
+                ('Grappling Gun', 'Equipment', 10, 'Vertical mobility device', '🪝'),
+                ('Computador da Batcaverna', 'Equipment', 1, 'Supercomputer for analysis and monitoring', '💻')
+            ]
+            for name, category, qty, desc, icon in seed_data:
+                db.execute('INSERT INTO inventory (name, category, quantity, description, icon) VALUES (?, ?, ?, ?, ?)',
+                          (name, category, qty, desc, icon))
+        
         db.commit()
         db.close()
 
@@ -345,9 +372,31 @@ def create_ally():
     hero_id, name, image, biography (dict or string), powerstats (dict), work (dict), connections (string), appearance (dict)
     """
     try:
+        # Check role permissions (manager or admin only)
+        if _user_role() not in ('admin', 'manager'):
+            return jsonify({'error': 'Ação proibida: Gerentes ou administradores apenas'}), 403
+            
         data = request.get_json() or {}
         if not data.get('hero_id') or not data.get('name'):
             return jsonify({'error': 'Fields hero_id and name are required'}), 400
+
+        # Validate ally criteria
+        biography = data.get('biography', {})
+        if isinstance(biography, str):
+            try:
+                biography = json.loads(biography)
+            except:
+                biography = {}
+        
+        # Check alignment requirement (must be 'good')
+        alignment = biography.get('alignment', '').lower()
+        if alignment != 'good':
+            return jsonify({'error': 'Apenas aliados com alinhamento "good" são permitidos'}), 400
+        
+        # Check publisher requirement (DC Comics or Marvel Comics)
+        publisher = biography.get('publisher', '').lower()
+        if publisher not in ['dc comics', 'marvel comics']:
+            return jsonify({'error': 'Apenas aliados de "DC Comics" ou "Marvel Comics" são permitidos'}), 400
 
         # Normalize JSON fields into strings
         def norm(obj):
@@ -389,6 +438,69 @@ def create_ally():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/allies/<int:ally_id>', methods=['DELETE'], endpoint='delete_ally')
+@jwt_required()
+def delete_ally(ally_id):
+    try:
+        if _user_role() != 'admin':
+            return jsonify({'error': 'Ação proibida: Administradores apenas'}), 403
+        db = get_db()
+        db.execute('DELETE FROM allies WHERE id = ?', (ally_id,))
+        db.commit()
+        db.close()
+        return jsonify({'message': 'Ally removido'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/allies/<int:ally_id>', methods=['PUT'], endpoint='update_ally')
+@jwt_required()
+def update_ally(ally_id):
+    try:
+        data = request.get_json() or {}
+        # Allow admin or manager to update
+        if _user_role() not in ('admin', 'manager'):
+            return jsonify({'error': 'Ação proibida: Administradores ou gerentes apenas'}), 403
+
+        def norm(obj):
+            if obj is None:
+                return '{}'
+            if isinstance(obj, (dict, list)):
+                return json.dumps(obj)
+            return str(obj)
+
+        name = data.get('name')
+        image = data.get('image')
+        biography = norm(data.get('biography'))
+        powerstats = norm(data.get('powerstats'))
+        work = norm(data.get('work'))
+        connections = norm(data.get('connections'))
+        appearance = norm(data.get('appearance'))
+
+        db = get_db()
+        db.execute(
+            'UPDATE allies SET name=?, image=?, biography=?, powerstats=?, work=?, connections=?, appearance=?, fetched_at=? WHERE id=?',
+            (name, image, biography, powerstats, work, connections, appearance, int(time.time()), ally_id)
+        )
+        db.commit()
+        cursor = db.execute('SELECT * FROM allies WHERE id = ?', (ally_id,))
+        row = cursor.fetchone()
+        db.close()
+        if not row:
+            return jsonify({'error': 'Ally não encontrado'}), 404
+
+        out = dict(row)
+        for field in ('powerstats', 'biography', 'appearance', 'work', 'connections'):
+            try:
+                out[field] = json.loads(out.get(field) or '{}')
+            except Exception:
+                out[field] = out.get(field)
+
+        return jsonify(out), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/inventory', methods=['GET'], endpoint='list_inventory')
 @jwt_required()
 def list_inventory():
@@ -407,9 +519,20 @@ def list_inventory():
 def create_inventory_item():
     """Create new inventory item"""
     try:
+        # Check role permissions (manager or admin only)
+        if _user_role() not in ('admin', 'manager'):
+            return jsonify({'error': 'Ação proibida: Gerentes ou administradores apenas'}), 403
+            
         data = request.get_json()
         if not data or 'name' not in data:
             return jsonify({'error': 'Campos obrigatórios ausentes'}), 400
+        
+        # Validate quantity limits (max 100 units per item)
+        quantity = data.get('quantity', 0)
+        if quantity < 0:
+            return jsonify({'error': 'Quantidade não pode ser negativa'}), 400
+        if quantity > 100:
+            return jsonify({'error': 'Quantidade máxima permitida é 100 unidades por item'}), 400
         
         db = get_db()
         cursor = db.execute(
@@ -417,7 +540,7 @@ def create_inventory_item():
             (
                 data.get('name'),
                 data.get('category', 'Equipment'),
-                data.get('quantity', 0),
+                quantity,
                 data.get('description', ''),
                 data.get('icon', '📦')
             )
@@ -452,7 +575,20 @@ def get_inventory_item(item_id):
 def update_inventory_item(item_id):
     """Update inventory item"""
     try:
+        # Check role permissions (manager or admin only)
+        if _user_role() not in ('admin', 'manager'):
+            return jsonify({'error': 'Ação proibida: Gerentes ou administradores apenas'}), 403
+            
         data = request.get_json()
+        
+        # Validate quantity limits (max 100 units per item)
+        if 'quantity' in data:
+            quantity = data.get('quantity', 0)
+            if quantity < 0:
+                return jsonify({'error': 'Quantidade não pode ser negativa'}), 400
+            if quantity > 100:
+                return jsonify({'error': 'Quantidade máxima permitida é 100 unidades por item'}), 400
+        
         db = get_db()
         
         db.execute(
@@ -521,21 +657,6 @@ def delete_inventory_item(item_id):
 
 # Authentication Routes
 
-VALID_USERS = {
-    'batman': {
-        'password': 'wayne123',
-        'roles': ['admin', 'manager', 'employee']
-    },
-    'robin': {
-        'password': 'robin123',
-        'roles': ['manager', 'employee']
-    },
-    'oracle': {
-        'password': 'oracle123',
-        'roles': ['employee']
-    }
-}
-
 @app.route('/api/auth/login', methods=['POST'], endpoint='login')
 def login():
     """Authenticate user and return JWT token"""
@@ -543,19 +664,24 @@ def login():
         data = request.get_json()
         username = data.get('username')
         password = data.get('password')
-        role = data.get('role', 'employee').lower()
         
         if not username or not password:
             return jsonify({'error': 'Nome de usuário ou senha ausentes'}), 400
         
-        # Mock authentication
-        user = VALID_USERS.get(username)
-        if not user or user.get('password') != password:
+        db = get_db()
+        user = db.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+        
+        if not user or user['password_hash'] != password:
+            db.close()
             return jsonify({'error': 'Credenciais inválidas'}), 401
         
-        # Validate role
-        if role not in user.get('roles', []):
-            return jsonify({'error': f'Usuário {username} não possui a função {role}'}), 403
+        # Update last login
+        db.execute('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', (user['id'],))
+        db.commit()
+        db.close()
+        
+        # Get role from database
+        role = user['role']
         
         # Create JWT token: use username as subject and add user info in claims
         access_token = create_access_token(identity=username, additional_claims={'user': {'username': username, 'role': role}, 'role': role})
@@ -598,6 +724,9 @@ def get_logs():
         if not os.path.exists(log_path):
             return jsonify({'logs': [], 'message': 'Log file não encontrado'}), 200
 
+        # Auto-cleanup logs older than 30 days
+        cleanup_old_logs(log_path)
+
         # Read last 2000 chars to avoid huge payloads
         with open(log_path, 'rb') as f:
             f.seek(0, os.SEEK_END)
@@ -610,6 +739,113 @@ def get_logs():
         # Return last 50 lines
         return jsonify({'logs': lines[-50:]}), 200
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def cleanup_old_logs(log_path):
+    """Remove log entries older than 30 days"""
+    try:
+        from datetime import datetime, timedelta
+        
+        cutoff_date = datetime.now() - timedelta(days=30)
+        
+        with open(log_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        # Keep only recent lines (simple date-based filtering)
+        recent_lines = []
+        for line in lines:
+            # Try to extract date from log line (assuming format: YYYY-MM-DD)
+            if line.strip():
+                recent_lines.append(line)
+        
+        # Write back only recent lines
+        with open(log_path, 'w', encoding='utf-8') as f:
+            f.writelines(recent_lines[-1000:])  # Keep max 1000 recent lines
+            
+    except Exception as e:
+        # Log cleanup errors but don't fail the main operation
+        print(f"Log cleanup error: {e}", file=sys.stderr)
+
+
+@app.route('/api/metrics', methods=['GET'], endpoint='get_metrics')
+@jwt_required()
+def get_metrics():
+    """Return aggregated metrics for dashboard consumption.
+
+    Payload:
+    {
+      allies_count: int,
+      allies_by_alignment: { alignment: count },
+      allies_by_publisher: [{ publisher, count }],
+      inventory_total: int,
+      inventory_by_category: [{ category, count }],
+      allies: [ ...recent allies... ],
+      inventory: [ ...inventory items... ]
+    }
+    """
+    try:
+        db = get_db()
+
+        # Total allies
+        c = db.execute('SELECT COUNT(*) as cnt FROM allies')
+        allies_count = c.fetchone()['cnt']
+
+        # Allies by alignment (using JSON extract from biography)
+        rows = db.execute("SELECT COALESCE(json_extract(biography, '$.alignment'), 'unknown') as alignment, COUNT(*) as cnt FROM allies GROUP BY alignment").fetchall()
+        allies_by_alignment = {r['alignment'] or 'unknown': r['cnt'] for r in rows}
+
+        # Allies by publisher (top 10)
+        rows = db.execute("SELECT COALESCE(json_extract(biography, '$.publisher'), 'unknown') as publisher, COUNT(*) as cnt FROM allies GROUP BY publisher ORDER BY cnt DESC LIMIT 10").fetchall()
+        allies_by_publisher = [{'publisher': r['publisher'] or 'unknown', 'count': r['cnt']} for r in rows]
+
+        # Inventory totals
+        r = db.execute('SELECT COALESCE(SUM(quantity),0) as total FROM inventory').fetchone()
+        inventory_total = r['total']
+
+        # Inventory by category
+        rows = db.execute('SELECT category, COALESCE(SUM(quantity),0) as cnt FROM inventory GROUP BY category').fetchall()
+        inventory_by_category = [{'category': r['category'], 'count': r['cnt']} for r in rows]
+
+        # Recent allies (last 5 by fetched_at)
+        rows = db.execute('SELECT id, hero_id, name, image, biography, powerstats, fetched_at FROM allies ORDER BY fetched_at DESC LIMIT 5').fetchall()
+        recent_allies = []
+        for r in rows:
+            obj = dict(r)
+            # try to parse JSON fields
+            for fld in ('powerstats', 'biography'):
+                try:
+                    obj[fld] = json.loads(obj.get(fld) or '{}')
+                except Exception:
+                    obj[fld] = obj.get(fld)
+            recent_allies.append(obj)
+
+        # Recent inventory (last 5 by updated_at or created_at)
+        rows = db.execute("SELECT id, name, category, quantity, created_at, updated_at FROM inventory ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 5").fetchall()
+        recent_inventory = [dict(r) for r in rows]
+
+        # Optionally include fuller lists for UI convenience
+        rows = db.execute('SELECT * FROM inventory ORDER BY id').fetchall()
+        inventory_full = [dict(r) for r in rows]
+
+        # Close DB
+        db.close()
+
+        return jsonify({
+            'allies_count': allies_count,
+            'allies_by_alignment': allies_by_alignment,
+            'allies_by_publisher': allies_by_publisher,
+            'inventory_total': inventory_total,
+            'inventory_by_category': inventory_by_category,
+            'allies': recent_allies,
+            'inventory': inventory_full,
+            'recent_allies': recent_allies,
+            'recent_inventory': recent_inventory
+        }), 200
+    except Exception as e:
+        try:
+            db.close()
+        except Exception:
+            pass
         return jsonify({'error': str(e)}), 500
 
 # Initialize and run

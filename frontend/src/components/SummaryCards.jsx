@@ -12,11 +12,13 @@ export default function SummaryCards({ allies = [], inventory = [], logs = [] })
       <div className="hud-card p-4">
         <h3 className="text-sm font-mono text-hud-text">ALIADOS ATIVOS</h3>
         <div className="text-3xl font-bold text-hud-glow font-mono">{alliesCount}</div>
+        <div className="text-xs text-hud-text mt-2">Aliados monitorados na base de dados local.</div>
       </div>
 
       <div className="hud-card p-4">
         <h3 className="text-sm font-mono text-hud-text">TOTAL DE ITENS</h3>
         <div className="text-3xl font-bold text-hud-glow font-mono">{totalItems}</div>
+        <div className="text-xs text-hud-text mt-2">Soma de quantidades por item em inventário.</div>
       </div>
 
       <div className="hud-card p-4">

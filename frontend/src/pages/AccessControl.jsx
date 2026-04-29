@@ -6,7 +6,6 @@ export default function AccessControl({ onLogin }) {
   const [step, setStep] = useState('biometric') // 'biometric' -> 'login'
   const [username, setUsername] = useState('batman')
   const [password, setPassword] = useState('wayne123')
-  const [selectedRole, setSelectedRole] = useState('employee')
   const [scanProgress, setScanProgress] = useState(0)
   const [error, setError] = useState(null)
   const { login, loading } = useAuth()
@@ -30,10 +29,11 @@ export default function AccessControl({ onLogin }) {
     e.preventDefault()
     setError(null)
     try {
-      const token = await login(username, password, selectedRole)
+      const token = await login(username, password)
       onLogin(token)
     } catch (err) {
-      setError('Autenticação falhou. Tente: batman / wayne123')
+      const errorMsg = err.response?.data?.message || err.response?.data?.error || 'Credenciais inválidas'
+      setError('Credenciais inválidas. Tente novamente.')
     }
   }
 
@@ -181,18 +181,6 @@ export default function AccessControl({ onLogin }) {
               />
             </div>
 
-            <div>
-              <label className="block text-hud-text font-mono text-sm mb-2">NÍVEL DE ACESSO</label>
-              <select
-                value={selectedRole}
-                onChange={(e) => setSelectedRole(e.target.value)}
-                className="w-full px-3 py-2"
-              >
-                <option value="employee">Funcionário</option>
-                <option value="manager">Gerente</option>
-                <option value="admin">Administrador</option>
-              </select>
-            </div>
 
             <button
               type="submit"

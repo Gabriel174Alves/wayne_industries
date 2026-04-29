@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { motion } from 'framer-motion'
 import KPITile from '../components/KPITile'
 import VehicleMetricsChart from '../components/VehicleMetricsChart'
+import MetricsCharts from '../components/MetricsCharts'
 import { useQuery } from '../hooks/useQuery'
 import { useInventory } from '../context/InventoryContext'
 import SummaryCards from '../components/SummaryCards'
@@ -9,21 +10,23 @@ import AlliesMonitor from '../components/AlliesMonitor'
 import InventoryManager from '../components/InventoryManager'
 
 export default function ControlTower({ token }) {
-  const { state, setAllies } = useInventory()
+  const { state, setAllies, setInventory } = useInventory()
 
-  // Fetch allies for metrics
-  const { loading } = useQuery('/api/allies', {
+  // Fetch aggregated metrics and set context state for allies/inventory
+  const { data: metricsData, loading } = useQuery('/api/metrics', {
     token,
-    onSuccess: (data) => setAllies(data)
+    onSuccess: (data) => {
+      // prefer full lists if present, otherwise use recent arrays
+      setAllies(data.allies || data.recent_allies || [])
+      setInventory(data.inventory || data.recent_inventory || [])
+    }
   })
 
-  // Fetch persisted inventory and logs for dashboard
-  const { data: inventoryData, loading: invLoading, refetch: refetchInventory } = useQuery('/api/inventory', { token, onSuccess: (d) => setInventory(d) })
+  // Persisted logs
   const { data: logsData, loading: logsLoading } = useQuery('/api/logs', { token })
 
-  const batman = state.allies?.[0]
-  const flash = state.allies?.[1]
-  const nightwing = state.allies?.[2]
+  const alliesCount = metricsData?.allies_count || (state.allies || []).length
+  const inventoryTotal = metricsData?.inventory_total || (state.inventory || []).reduce((s, i) => s + (i.quantity || 0), 0)
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -56,25 +59,25 @@ export default function ControlTower({ token }) {
           {/* KPI Tiles */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <KPITile
-              title="CAPACIDADE DE REDE"
-              value={batman?.powerstats?.Intelligence || 0}
-              unit="%"
+              title="TOTAL DE ALIADOS"
+              value={alliesCount}
+              unit=""
               trend={5}
-              icon="🧠"
+              icon="🤝"
             />
             <KPITile
-              title="TEMPO DE RESPOSTA"
-              value={flash?.powerstats?.Speed || 0}
-              unit="ms"
-              trend={-12}
-              icon="⚡"
+              title="TOTAL DE ITENS"
+              value={inventoryTotal}
+              unit=""
+              trend={-2}
+              icon="📦"
             />
             <KPITile
-              title="DURABILIDADE DO SISTEMA"
-              value={nightwing?.powerstats?.Durability || 0}
-              unit="%"
+              title="EDITIONS RECENTES"
+              value={(metricsData?.recent_allies?.length || 0) + (metricsData?.recent_inventory?.length || 0)}
+              unit=""
               trend={3}
-              icon="🛡️"
+              icon="🕒"
             />
           </div>
 
@@ -82,10 +85,17 @@ export default function ControlTower({ token }) {
           <AlliesMonitor allies={state.allies || []} />
 
           {/* Charts */}
-          <VehicleMetricsChart allies={state.allies} />
+          <VehicleMetricsChart allies={state.allies} inventory={state.inventory} />
+          <MetricsCharts metrics={metricsData || {}} />
 
           {/* Inventory Manager (inline CRUD) */}
-          <InventoryManager inventory={state.inventory || []} token={token} onRefresh={() => refetchInventory && refetchInventory()} />
+          <InventoryManager inventory={state.inventory || []} token={token} onRefresh={() => {
+            // Recarregar dados do inventário
+            fetch('/api/inventory', { headers: { Authorization: `Bearer ${token}` } })
+              .then(res => res.json())
+              .then(data => setInventory(data))
+              .catch(err => console.error('Failed to refresh inventory:', err))
+          }} />
         </div>
       )}
     </div>
