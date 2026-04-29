@@ -1,8 +1,0 @@
-Traceback (most recent call last):
-  File "C:\Users\Gabriel\Documents\projeto_batman\backend\app.py", line 279, in <module>
-    print("\U0001f987 Wayne Industries Asset Management System - Backend v1.0")
-    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\Gabriel\AppData\Local\Programs\Python\Python313\Lib\encodings\cp1252.py", line 19, in encode
-    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
-           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f987' in position 0: character maps to <undefined>
